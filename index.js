@@ -135,6 +135,11 @@ function problemLink(sub) {
     return `https://codeforces.com/problemset/problem/${contestId}/${index}`;
 }
 
+// Escape characters that break Telegram Markdown mode
+function escMd(text) {
+    return String(text).replace(/[_*`[\]]/g, '\\$&');
+}
+
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 const HELP_TEXT =
@@ -223,7 +228,7 @@ bot.onText(/\/addhandle(?:@\S+)?\s+@?(\S+)\s+(\S+)/i, async (msg, match) => {
 
     bot.sendMessage(
         chatId,
-        `✅ *@${telegramUsername}* registered with Codeforces handle \`${cfHandle}\`\nNew solves will now be announced here! 🎯`,
+        `✅ *@${escMd(telegramUsername)}* registered with Codeforces handle \`${escMd(cfHandle)}\`\nNew solves will now be announced here! 🎯`,
         { parse_mode: 'Markdown' }
     );
 });
@@ -240,7 +245,7 @@ bot.onText(/\/removehandle(?:@\S+)?\s+@?(\S+)/i, (msg, match) => {
     const username = db.handles[key].telegramUsername;
     delete db.handles[key];
     saveData(db);
-    bot.sendMessage(chatId, `✅ Removed handle for *@${username}*.`, { parse_mode: 'Markdown' });
+    bot.sendMessage(chatId, `✅ Removed handle for *@${escMd(username)}*.`, { parse_mode: 'Markdown' });
 });
 
 // /handles — list all registered handles
@@ -255,7 +260,7 @@ bot.onText(/\/handles(?:@\S+)?(?:\s|$)/, (msg) => {
         );
     }
     const list = entries
-        .map(e => `• @${e.telegramUsername} → \`${e.cfHandle}\``)
+        .map(e => `• @${escMd(e.telegramUsername)} → \`${escMd(e.cfHandle)}\``)
         .join('\n');
     bot.sendMessage(msg.chat.id, `📋 *Registered Handles:*\n\n${list}`, { parse_mode: 'Markdown' });
 });
@@ -271,7 +276,7 @@ bot.onText(/\/leaderboard(?:@\S+)?(?:\s|$)/, (msg) => {
     const sorted  = [...entries].sort((a, b) => (b.solveCount || 0) - (a.solveCount || 0));
     const medals  = ['🥇', '🥈', '🥉'];
     const rows    = sorted
-        .map((e, i) => `${medals[i] || `${i + 1}.`} @${e.telegramUsername} — *${e.solveCount || 0}* solves  (\`${e.cfHandle}\`)`)
+        .map((e, i) => `${medals[i] || `${i + 1}.`} @${escMd(e.telegramUsername)} — *${e.solveCount || 0}* solves  (\`${escMd(e.cfHandle)}\`)`)
         .join('\n');
     bot.sendMessage(msg.chat.id, `🏆 *Leaderboard*\n\n${rows}`, { parse_mode: 'Markdown' });
 });
@@ -366,7 +371,7 @@ cron.schedule(`*/${POLL_INTERVAL} * * * *`, async () => {
 
                     const message =
                         `🚀 *CP UPDATE*\n\n` +
-                        `@${user.telegramUsername} solved: *${prob.name}*\n` +
+                        `@${escMd(user.telegramUsername)} solved: *${escMd(prob.name)}*\n` +
                         `${rating}\n` +
                         `🔗 ${problemLink(sub)}`;
 
@@ -436,7 +441,7 @@ cron.schedule('0 9 * * *', () => {
 
     const rows = active.length
         ? active.map((e, i) =>
-            `${medals[i] || `${i + 1}.`} @${e.telegramUsername} — *${e.solveCount}* problems solved`
+            `${medals[i] || `${i + 1}.`} @${escMd(e.telegramUsername)} — *${e.solveCount}* problems solved`
           ).join('\n')
         : '_No problems solved yet. Time to grind!_ 💪';
 
