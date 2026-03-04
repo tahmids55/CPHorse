@@ -10,13 +10,15 @@ const path       = require('path');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const BOT_TOKEN     = process.env.BOT_TOKEN;
-const WEBHOOK_URL   = process.env.WEBHOOK_URL;   // e.g. https://your-app.onrender.com
+// Render automatically sets RENDER_EXTERNAL_URL — use it as fallback so you
+// don't need to set WEBHOOK_URL manually in the Render dashboard.
+const WEBHOOK_URL   = process.env.WEBHOOK_URL || process.env.RENDER_EXTERNAL_URL;
 const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID; // Telegram group chat ID (negative number)
 const PORT          = process.env.PORT || 3000;
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL || '5', 10); // minutes
 
 if (!BOT_TOKEN)   throw new Error('BOT_TOKEN is not set!');
-if (!WEBHOOK_URL) throw new Error('WEBHOOK_URL is not set!');
+if (!WEBHOOK_URL) throw new Error('Neither WEBHOOK_URL nor RENDER_EXTERNAL_URL is set!');
 if (!GROUP_CHAT_ID) {
     console.warn('⚠️  GROUP_CHAT_ID is not set — solve alerts and reminders will be disabled until you set it in Render and redeploy.');
 }
