@@ -174,7 +174,8 @@ const HELP_TEXT =
     `/addhandle @Username CFHandle — Register a Codeforces handle\n` +
     `/removehandle @Username — Remove a handle\n` +
     `/handles — List all registered handles\n` +
-    `/leaderboard — Total problems solved by all members\n` +
+    `/leaderboard — All-time problems solved by all members\n` +
+    `/dailyleaderboard — Today\'s problems solved\n` +
     `/contests — Upcoming Codeforces contests\n` +
     `/getchatid — Show this chat's ID (for setup)\n` +
     `/help — Show this menu`;
@@ -292,6 +293,33 @@ bot.onText(/\/handles(?:@\S+)?(?:\s|$)/, async (msg) => {
     bot.sendMessage(msg.chat.id, `📋 *Registered Handles:*\n\n${list}`, { parse_mode: 'Markdown' });
 });
 
+// /dailyleaderboard — today's solves for all registered members
+bot.onText(/\/dailyleaderboard(?:@\S+)?(?:\s|$)/, async (msg) => {
+    const db      = await loadData();
+    const entries = Object.values(db.handles);
+
+    if (!entries.length) {
+        return bot.sendMessage(msg.chat.id, 'ℹ️ No handles registered yet.');
+    }
+
+    const today   = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
+    const sorted  = [...entries].sort((a, b) => ((b.dailySolves && b.dailyDate === today ? b.dailySolves : 0) - (a.dailySolves && a.dailyDate === today ? a.dailySolves : 0)));
+    const medals  = ['🥇', '🥈', '🥉'];
+    const rows    = sorted
+        .map((e, i) => {
+            const count = (e.dailyDate === today ? e.dailySolves || 0 : 0);
+            return `${medals[i] || `${i + 1}.`} @${escMd(e.telegramUsername)} — *${count}* solved today  (\`${escMd(e.cfHandle)}\`)`;
+        })
+        .join('\n');
+
+    const dateStr = new Date().toUTCString().slice(0, 16);
+    bot.sendMessage(
+        msg.chat.id,
+        `📅 *Daily Leaderboard — ${dateStr} UTC*\n\n${rows}\n\n_Resets at midnight UTC_`,
+        { parse_mode: 'Markdown' }
+    );
+});
+
 // /leaderboard — all-time distinct problems solved on Codeforces (fetched live)
 bot.onText(/\/leaderboard(?:@\S+)?(?:\s|$)/, async (msg) => {
     const db      = await loadData();
@@ -371,7 +399,7 @@ bot.onText(/\/contests(?:@\S+)?(?:\s|$)/, async (msg) => {
 // Unknown-command catch-all
 bot.on('message', (msg) => {
     if (msg.text && msg.text.startsWith('/')) {
-        const known = ['/start', '/help', '/addhandle', '/removehandle', '/handles', '/leaderboard', '/contests', '/getchatid'];
+        const known = ['/start', '/help', '/addhandle', '/removehandle', '/handles', '/leaderboard', '/dailyleaderboard', '/contests', '/getchatid'];
         const cmd   = msg.text.split(' ')[0].split('@')[0];
         if (!known.includes(cmd)) {
             bot.sendMessage(msg.chat.id, `❓ Unknown command. Use /help to see available commands.`);
@@ -413,6 +441,15 @@ cron.schedule(`*/${POLL_INTERVAL} * * * *`, async () => {
                 // Advance the cursor
                 db.handles[key].lastSubmissionId = Math.max(...newSolves.map(s => s.id));
                 db.handles[key].solveCount       = (db.handles[key].solveCount || 0) + newSolves.length;
+
+                // Track daily solves — reset count if it's a new UTC day
+                const today = new Date().toISOString().slice(0, 10);
+                if (db.handles[key].dailyDate !== today) {
+                    db.handles[key].dailyDate   = today;
+                    db.handles[key].dailySolves = 0;
+                }
+                db.handles[key].dailySolves = (db.handles[key].dailySolves || 0) + newSolves.length;
+
                 changed = true;
 
                 // Post in chronological order (oldest first)
@@ -479,8 +516,49 @@ cron.schedule('* * * * *', async () => {
     }
 });
 
-// ─── Cron: Daily Summary at 09:00 UTC ────────────────────────────────────────
-// Posts a leaderboard-style summary every morning.
+// ─── Cron: Daily Leaderboard at 23:59 UTC ─────────────────────────────────────────────
+// Posts today's solve leaderboard at 23:59 UTC, then resets daily counts.
+cron.schedule('59 23 * * *', async () => {
+    const db      = await loadData();
+    const entries = Object.values(db.handles);
+    if (!entries.length) return;
+
+    const today  = new Date().toISOString().slice(0, 10);
+    const sorted = [...entries].sort((a, b) =>
+        ((b.dailyDate === today ? b.dailySolves || 0 : 0) -
+         (a.dailyDate === today ? a.dailySolves || 0 : 0))
+    );
+    const medals = ['🥇', '🥈', '🥉'];
+    const rows   = sorted
+        .map((e, i) => {
+            const count = (e.dailyDate === today ? e.dailySolves || 0 : 0);
+            return `${medals[i] || `${i + 1}.`} @${escMd(e.telegramUsername)} — *${count}* solved today`;
+        })
+        .join('\n');
+
+    const hasActivity = sorted.some(e => e.dailyDate === today && (e.dailySolves || 0) > 0);
+
+    await bot.sendMessage(
+        GROUP_CHAT_ID,
+        `📅 *Daily Leaderboard — ${today} UTC*\n\n` +
+        (hasActivity ? rows : '_No problems solved today. Grind harder tomorrow!_ 💪'),
+        { parse_mode: 'Markdown' }
+    );
+
+    // Reset daily counts for the new day
+    let changed = false;
+    for (const key of Object.keys(db.handles)) {
+        if ((db.handles[key].dailySolves || 0) > 0) {
+            db.handles[key].dailySolves = 0;
+            db.handles[key].dailyDate   = today;
+            changed = true;
+        }
+    }
+    if (changed) await saveData(db);
+});
+
+// ─── Cron: Morning Summary at 09:00 UTC ───────────────────────────────────────────
+// Motivational good-morning message with all-time top 3.
 cron.schedule('0 9 * * *', async () => {
     const db      = await loadData();
     const entries = Object.values(db.handles);
@@ -488,17 +566,13 @@ cron.schedule('0 9 * * *', async () => {
 
     const sorted = [...entries].sort((a, b) => (b.solveCount || 0) - (a.solveCount || 0));
     const medals = ['🥇', '🥈', '🥉'];
-    const active = sorted.filter(e => (e.solveCount || 0) > 0);
-
-    const rows = active.length
-        ? active.map((e, i) =>
-            `${medals[i] || `${i + 1}.`} @${escMd(e.telegramUsername)} — *${e.solveCount}* problems solved`
-          ).join('\n')
-        : '_No problems solved yet. Time to grind!_ 💪';
+    const top3   = sorted.slice(0, 3)
+        .map((e, i) => `${medals[i]} @${escMd(e.telegramUsername)} — *${e.solveCount || 0}* total`)
+        .join('\n');
 
     bot.sendMessage(
         GROUP_CHAT_ID,
-        `📊 *Daily CP Summary*\n\n${rows}\n\nKeep grinding! 💪`,
+        `☀️ *Good morning, grinders!*\n\nAll-time top 3:\n${top3}\n\nUse /dailyleaderboard to see today\'s progress. Keep grinding! 💪`,
         { parse_mode: 'Markdown' }
     );
 });
