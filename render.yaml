@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: cp-telegram-bot
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: BOT_TOKEN
+        sync: false          # Set manually in Render dashboard — your BotFather token
+      - key: WEBHOOK_URL
+        sync: false          # Set to https://<your-service-name>.onrender.com (no trailing slash)
+      - key: GROUP_CHAT_ID
+        sync: false          # Telegram group chat ID (negative number, e.g. -1001234567890)
+      - key: POLL_INTERVAL
+        value: "5"           # Codeforces polling frequency in minutes
