@@ -167,6 +167,16 @@ bot.onText(/\/help(?:@\S+)?$/, (msg) => {
     bot.sendMessage(msg.chat.id, HELP_TEXT, { parse_mode: 'Markdown' });
 });
 
+// /addhandle with wrong/missing arguments — show usage hint
+bot.onText(/\/addhandle(?:@\S+)?(?:\s+\S+)?$/, (msg) => {
+    bot.sendMessage(
+        msg.chat.id,
+        `⚠️ *Usage:* \`/addhandle @TelegramUsername CodeforcesHandle\`\n\n` +
+        `*Example:* \`/addhandle @beblet tourist\``,
+        { parse_mode: 'Markdown' }
+    );
+});
+
 // /addhandle @TelegramUsername CodeforcesHandle
 // Adds (or updates) a handle mapping. Verifies the CF handle exists before saving.
 bot.onText(/\/addhandle(?:@\S+)?\s+@?(\S+)\s+(\S+)/i, async (msg, match) => {
