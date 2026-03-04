@@ -133,6 +133,24 @@ async function getCFAllTimeSolves(handle) {
     return solved.size;
 }
 
+// Fetch distinct problems solved TODAY (UTC midnight → now) from CF API.
+// Fetches up to 300 submissions which handles even very active users within one day.
+async function getCFDailySolves(handle) {
+    const todayMidnightUtc = Math.floor(new Date().setUTCHours(0, 0, 0, 0) / 1000);
+    const { data } = await axios.get(`${CF_API}/user.status`, {
+        params: { handle, from: 1, count: 300 },
+        timeout: 15000
+    });
+    if (data.status !== 'OK') throw new Error(data.comment);
+    const solved = new Set();
+    for (const sub of data.result) {
+        if (sub.verdict === 'OK' && sub.creationTimeSeconds >= todayMidnightUtc) {
+            solved.add(`${sub.problem.contestId}-${sub.problem.index}`);
+        }
+    }
+    return solved.size;
+}
+
 async function verifyCFHandle(handle) {
     try {
         const { data } = await axios.get(`${CF_API}/user.info`, {
@@ -293,7 +311,7 @@ bot.onText(/\/handles(?:@\S+)?(?:\s|$)/, async (msg) => {
     bot.sendMessage(msg.chat.id, `📋 *Registered Handles:*\n\n${list}`, { parse_mode: 'Markdown' });
 });
 
-// /dailyleaderboard — today's solves for all registered members
+// /dailyleaderboard — today's solves for all registered members (fetched live from CF API)
 bot.onText(/\/dailyleaderboard(?:@\S+)?(?:\s|$)/, async (msg) => {
     const db      = await loadData();
     const entries = Object.values(db.handles);
@@ -302,20 +320,33 @@ bot.onText(/\/dailyleaderboard(?:@\S+)?(?:\s|$)/, async (msg) => {
         return bot.sendMessage(msg.chat.id, 'ℹ️ No handles registered yet.');
     }
 
-    const today   = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
-    const sorted  = [...entries].sort((a, b) => ((b.dailySolves && b.dailyDate === today ? b.dailySolves : 0) - (a.dailySolves && a.dailyDate === today ? a.dailySolves : 0)));
-    const medals  = ['🥇', '🥈', '🥉'];
-    const rows    = sorted
-        .map((e, i) => {
-            const count = (e.dailyDate === today ? e.dailySolves || 0 : 0);
-            return `${medals[i] || `${i + 1}.`} @${escMd(e.telegramUsername)} — *${count}* solved today  (\`${escMd(e.cfHandle)}\`)`;
+    const pending = await bot.sendMessage(msg.chat.id, '⏳ Fetching today\'s solve counts from Codeforces…');
+
+    const results = await Promise.all(
+        entries.map(async (e) => {
+            try {
+                const count = await getCFDailySolves(e.cfHandle);
+                return { ...e, count };
+            } catch {
+                return { ...e, count: 0 };
+            }
         })
+    );
+
+    bot.deleteMessage(msg.chat.id, pending.message_id).catch(() => {});
+
+    const sorted = results.sort((a, b) => b.count - a.count);
+    const medals = ['🥇', '🥈', '🥉'];
+    const rows   = sorted
+        .map((e, i) =>
+            `${medals[i] || `${i + 1}.`} @${escMd(e.telegramUsername)} — *${e.count}* solved today  (\`${escMd(e.cfHandle)}\`)`
+        )
         .join('\n');
 
-    const dateStr = new Date().toUTCString().slice(0, 16);
+    const dateStr = new Date().toISOString().slice(0, 10);
     bot.sendMessage(
         msg.chat.id,
-        `📅 *Daily Leaderboard — ${dateStr} UTC*\n\n${rows}\n\n_Resets at midnight UTC_`,
+        `📅 *Daily Leaderboard — ${dateStr} UTC*\n\n${rows}\n\n_Counts all Codeforces solves since midnight UTC_`,
         { parse_mode: 'Markdown' }
     );
 });
@@ -516,27 +547,35 @@ cron.schedule('* * * * *', async () => {
     }
 });
 
-// ─── Cron: Daily Leaderboard at 23:59 UTC ─────────────────────────────────────────────
-// Posts today's solve leaderboard at 23:59 UTC, then resets daily counts.
+// ─── Cron: Daily Leaderboard at 23:59 UTC ────────────────────────────────────
+// Posts today's final leaderboard (live from CF API) at 23:59 UTC.
 cron.schedule('59 23 * * *', async () => {
+    if (!GROUP_CHAT_ID) return;
     const db      = await loadData();
     const entries = Object.values(db.handles);
     if (!entries.length) return;
 
-    const today  = new Date().toISOString().slice(0, 10);
-    const sorted = [...entries].sort((a, b) =>
-        ((b.dailyDate === today ? b.dailySolves || 0 : 0) -
-         (a.dailyDate === today ? a.dailySolves || 0 : 0))
+    const results = await Promise.all(
+        entries.map(async (e) => {
+            try {
+                const count = await getCFDailySolves(e.cfHandle);
+                return { ...e, count };
+            } catch {
+                return { ...e, count: 0 };
+            }
+        })
     );
+
+    const sorted = results.sort((a, b) => b.count - a.count);
     const medals = ['🥇', '🥈', '🥉'];
     const rows   = sorted
-        .map((e, i) => {
-            const count = (e.dailyDate === today ? e.dailySolves || 0 : 0);
-            return `${medals[i] || `${i + 1}.`} @${escMd(e.telegramUsername)} — *${count}* solved today`;
-        })
+        .map((e, i) =>
+            `${medals[i] || `${i + 1}.`} @${escMd(e.telegramUsername)} — *${e.count}* solved today`
+        )
         .join('\n');
 
-    const hasActivity = sorted.some(e => e.dailyDate === today && (e.dailySolves || 0) > 0);
+    const hasActivity = results.some(e => e.count > 0);
+    const today = new Date().toISOString().slice(0, 10);
 
     await bot.sendMessage(
         GROUP_CHAT_ID,
@@ -544,17 +583,6 @@ cron.schedule('59 23 * * *', async () => {
         (hasActivity ? rows : '_No problems solved today. Grind harder tomorrow!_ 💪'),
         { parse_mode: 'Markdown' }
     );
-
-    // Reset daily counts for the new day
-    let changed = false;
-    for (const key of Object.keys(db.handles)) {
-        if ((db.handles[key].dailySolves || 0) > 0) {
-            db.handles[key].dailySolves = 0;
-            db.handles[key].dailyDate   = today;
-            changed = true;
-        }
-    }
-    if (changed) await saveData(db);
 });
 
 // ─── Cron: Morning Summary at 09:00 UTC ───────────────────────────────────────────
