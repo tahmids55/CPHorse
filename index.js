@@ -15,9 +15,11 @@ const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID; // Telegram group chat ID (nega
 const PORT          = process.env.PORT || 3000;
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL || '5', 10); // minutes
 
-if (!BOT_TOKEN)     throw new Error('BOT_TOKEN is not set!');
-if (!WEBHOOK_URL)   throw new Error('WEBHOOK_URL is not set!');
-if (!GROUP_CHAT_ID) throw new Error('GROUP_CHAT_ID is not set!');
+if (!BOT_TOKEN)   throw new Error('BOT_TOKEN is not set!');
+if (!WEBHOOK_URL) throw new Error('WEBHOOK_URL is not set!');
+if (!GROUP_CHAT_ID) {
+    console.warn('⚠️  GROUP_CHAT_ID is not set — solve alerts and reminders will be disabled until you set it in Render and redeploy.');
+}
 
 // ─── JSON Data Store ──────────────────────────────────────────────────────────
 // Stores registered handles and solve counts.
@@ -138,7 +140,17 @@ const HELP_TEXT =
     `/handles — List all registered handles\n` +
     `/leaderboard — Total problems solved by all members\n` +
     `/contests — Upcoming Codeforces contests\n` +
+    `/getchatid — Show this chat's ID (for setup)\n` +
     `/help — Show this menu`;
+
+// /getchatid — prints the current chat's ID so you can copy it into Render env vars
+bot.onText(/\/getchatid(?:@\S+)?$/, (msg) => {
+    bot.sendMessage(
+        msg.chat.id,
+        `🆔 *Chat ID:* \`${msg.chat.id}\`\n_Copy this value and set it as GROUP\_CHAT\_ID in your Render environment variables._`,
+        { parse_mode: 'Markdown' }
+    );
+});
 
 // /start
 bot.onText(/\/start(?:@\S+)?$/, (msg) => {
@@ -289,7 +301,7 @@ bot.onText(/\/contests(?:@\S+)?$/, async (msg) => {
 // Unknown-command catch-all
 bot.on('message', (msg) => {
     if (msg.text && msg.text.startsWith('/')) {
-        const known = ['/start', '/help', '/addhandle', '/removehandle', '/handles', '/leaderboard', '/contests'];
+        const known = ['/start', '/help', '/addhandle', '/removehandle', '/handles', '/leaderboard', '/contests', '/getchatid'];
         const cmd   = msg.text.split(' ')[0].split('@')[0];
         if (!known.includes(cmd)) {
             bot.sendMessage(msg.chat.id, `❓ Unknown command. Use /help to see available commands.`);
