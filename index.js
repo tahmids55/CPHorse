@@ -105,7 +105,23 @@ async function getCFContests() {
     return data.result.filter(c => c.phase === 'BEFORE');
 }
 
-// Verify a Codeforces handle exists
+// Fetch total count of DISTINCT problems ever solved (AC) on Codeforces for a handle.
+// Fetches up to 10 000 submissions and counts unique problem IDs.
+async function getCFAllTimeSolves(handle) {
+    const { data } = await axios.get(`${CF_API}/user.status`, {
+        params: { handle, from: 1, count: 10000 },
+        timeout: 15000
+    });
+    if (data.status !== 'OK') throw new Error(data.comment);
+    const solved = new Set();
+    for (const sub of data.result) {
+        if (sub.verdict === 'OK') {
+            solved.add(`${sub.problem.contestId}-${sub.problem.index}`);
+        }
+    }
+    return solved.size;
+}
+
 async function verifyCFHandle(handle) {
     try {
         const { data } = await axios.get(`${CF_API}/user.info`, {
@@ -265,20 +281,44 @@ bot.onText(/\/handles(?:@\S+)?(?:\s|$)/, (msg) => {
     bot.sendMessage(msg.chat.id, `📋 *Registered Handles:*\n\n${list}`, { parse_mode: 'Markdown' });
 });
 
-// /leaderboard — sorted by total problems solved
-bot.onText(/\/leaderboard(?:@\S+)?(?:\s|$)/, (msg) => {
+// /leaderboard — all-time distinct problems solved on Codeforces (fetched live)
+bot.onText(/\/leaderboard(?:@\S+)?(?:\s|$)/, async (msg) => {
     const db      = loadData();
     const entries = Object.values(db.handles);
 
     if (!entries.length) {
         return bot.sendMessage(msg.chat.id, 'ℹ️ No handles registered yet.');
     }
-    const sorted  = [...entries].sort((a, b) => (b.solveCount || 0) - (a.solveCount || 0));
-    const medals  = ['🥇', '🥈', '🥉'];
-    const rows    = sorted
-        .map((e, i) => `${medals[i] || `${i + 1}.`} @${escMd(e.telegramUsername)} — *${e.solveCount || 0}* solves  (\`${escMd(e.cfHandle)}\`)`)
+
+    const pending = await bot.sendMessage(msg.chat.id, '⏳ Fetching all-time solve counts from Codeforces…');
+
+    // Fetch real all-time solve counts for every registered handle
+    const results = await Promise.all(
+        entries.map(async (e) => {
+            try {
+                const total = await getCFAllTimeSolves(e.cfHandle);
+                return { ...e, total };
+            } catch {
+                return { ...e, total: '?' };
+            }
+        })
+    );
+
+    bot.deleteMessage(msg.chat.id, pending.message_id).catch(() => {});
+
+    const sorted = results.sort((a, b) => (Number(b.total) || 0) - (Number(a.total) || 0));
+    const medals = ['🥇', '🥈', '🥉'];
+    const rows   = sorted
+        .map((e, i) =>
+            `${medals[i] || `${i + 1}.`} @${escMd(e.telegramUsername)} — *${e.total}* problems solved  (\`${escMd(e.cfHandle)}\`)`
+        )
         .join('\n');
-    bot.sendMessage(msg.chat.id, `🏆 *Leaderboard*\n\n${rows}`, { parse_mode: 'Markdown' });
+
+    bot.sendMessage(
+        msg.chat.id,
+        `🏆 *All-Time Leaderboard*\n_(distinct problems solved on Codeforces)_\n\n${rows}`,
+        { parse_mode: 'Markdown' }
+    );
 });
 
 // /contests — upcoming Codeforces contests (next 5)
