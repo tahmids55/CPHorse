@@ -21,30 +21,43 @@ if (!GROUP_CHAT_ID) {
     console.warn('⚠️  GROUP_CHAT_ID is not set — solve alerts and reminders will be disabled until you set it in Render and redeploy.');
 }
 
-// ─── JSON Data Store ──────────────────────────────────────────────────────────
-// Stores registered handles and solve counts.
-// NOTE: Persists across restarts but resets on fresh Render deploys.
-// For permanent storage, swap this section with a database (e.g. Firebase, MongoDB).
-const DATA_DIR  = path.join(__dirname, 'data');
-const DATA_FILE = path.join(DATA_DIR, 'data.json');
+// ─── Upstash Redis Data Store ─────────────────────────────────────────────────
+// Uses Upstash Redis REST API — free tier, survives every deploy/restart.
+// Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in Render env vars.
+const UPSTASH_URL   = process.env.UPSTASH_REDIS_REST_URL;
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+const REDIS_KEY     = 'cp-bot-data';
 
-function loadData() {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    if (!fs.existsSync(DATA_FILE)) {
-        const empty = { handles: {} };
-        fs.writeFileSync(DATA_FILE, JSON.stringify(empty, null, 2));
-        return empty;
-    }
+if (!UPSTASH_URL || !UPSTASH_TOKEN) {
+    console.warn('⚠️  Upstash env vars not set — data will NOT persist across deploys! Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.');
+}
+
+async function loadData() {
+    if (!UPSTASH_URL || !UPSTASH_TOKEN) return { handles: {} };
     try {
-        return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
-    } catch {
+        const res = await axios.get(`${UPSTASH_URL}/get/${REDIS_KEY}`, {
+            headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+            timeout: 8000
+        });
+        const raw = res.data.result;
+        return raw ? JSON.parse(raw) : { handles: {} };
+    } catch (err) {
+        console.error('[Redis] loadData error:', err.message);
         return { handles: {} };
     }
 }
 
-function saveData(data) {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+async function saveData(data) {
+    if (!UPSTASH_URL || !UPSTASH_TOKEN) return;
+    try {
+        await axios.post(
+            `${UPSTASH_URL}/set/${REDIS_KEY}`,
+            JSON.stringify(data),
+            { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}`, 'Content-Type': 'application/json' }, timeout: 8000 }
+        );
+    } catch (err) {
+        console.error('[Redis] saveData error:', err.message);
+    }
 }
 
 // Data shape:
