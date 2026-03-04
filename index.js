@@ -4,8 +4,6 @@ const TelegramBot = require('node-telegram-bot-api');
 const axios      = require('axios');
 const cron       = require('node-cron');
 const express    = require('express');
-const fs         = require('fs');
-const path       = require('path');
 
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -229,7 +227,7 @@ bot.onText(/\/addhandle(?:@\S+)?\s+@?(\S+)\s+(\S+)/i, async (msg, match) => {
         lastId = subs.length ? subs[0].id : null;
     } catch { /* user has no submissions yet */ }
 
-    const db  = loadData();
+    const db  = await loadData();
     const key = telegramUsername.toLowerCase();
 
     // Preserve existing solve count if re-registering
@@ -240,7 +238,7 @@ bot.onText(/\/addhandle(?:@\S+)?\s+@?(\S+)\s+(\S+)/i, async (msg, match) => {
         lastSubmissionId: lastId,
         solveCount: existing ? existing.solveCount : 0
     };
-    saveData(db);
+    await saveData(db);
 
     bot.sendMessage(
         chatId,
@@ -250,23 +248,23 @@ bot.onText(/\/addhandle(?:@\S+)?\s+@?(\S+)\s+(\S+)/i, async (msg, match) => {
 });
 
 // /removehandle @TelegramUsername
-bot.onText(/\/removehandle(?:@\S+)?\s+@?(\S+)/i, (msg, match) => {
+bot.onText(/\/removehandle(?:@\S+)?\s+@?(\S+)/i, async (msg, match) => {
     const chatId   = msg.chat.id;
     const key      = match[1].replace(/^@/, '').toLowerCase();
-    const db       = loadData();
+    const db       = await loadData();
 
     if (!db.handles[key]) {
         return bot.sendMessage(chatId, `ℹ️ No handle registered for @${match[1].replace(/^@/, '')}.`);
     }
     const username = db.handles[key].telegramUsername;
     delete db.handles[key];
-    saveData(db);
+    await saveData(db);
     bot.sendMessage(chatId, `✅ Removed handle for *@${escMd(username)}*.`, { parse_mode: 'Markdown' });
 });
 
 // /handles — list all registered handles
-bot.onText(/\/handles(?:@\S+)?(?:\s|$)/, (msg) => {
-    const db      = loadData();
+bot.onText(/\/handles(?:@\S+)?(?:\s|$)/, async (msg) => {
+    const db      = await loadData();
     const entries = Object.values(db.handles);
 
     if (!entries.length) {
@@ -283,7 +281,7 @@ bot.onText(/\/handles(?:@\S+)?(?:\s|$)/, (msg) => {
 
 // /leaderboard — all-time distinct problems solved on Codeforces (fetched live)
 bot.onText(/\/leaderboard(?:@\S+)?(?:\s|$)/, async (msg) => {
-    const db      = loadData();
+    const db      = await loadData();
     const entries = Object.values(db.handles);
 
     if (!entries.length) {
@@ -375,7 +373,7 @@ bot.on('message', (msg) => {
 // For each registered handle it fetches the 20 most recent submissions and
 // announces any AC submissions newer than the stored lastSubmissionId.
 cron.schedule(`*/${POLL_INTERVAL} * * * *`, async () => {
-    const db    = loadData();
+    const db    = await loadData();
     const users = Object.entries(db.handles);
     if (!users.length) return;
 
@@ -429,7 +427,7 @@ cron.schedule(`*/${POLL_INTERVAL} * * * *`, async () => {
         }
     }
 
-    if (changed) saveData(db);
+    if (changed) await saveData(db);
 });
 
 // ─── Cron: Contest Reminders — checked every minute ──────────────────────────
@@ -470,8 +468,8 @@ cron.schedule('* * * * *', async () => {
 
 // ─── Cron: Daily Summary at 09:00 UTC ────────────────────────────────────────
 // Posts a leaderboard-style summary every morning.
-cron.schedule('0 9 * * *', () => {
-    const db      = loadData();
+cron.schedule('0 9 * * *', async () => {
+    const db      = await loadData();
     const entries = Object.values(db.handles);
     if (!entries.length) return;
 
