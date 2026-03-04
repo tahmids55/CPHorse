@@ -72,10 +72,12 @@ bot.setWebHook(`${WEBHOOK_URL}/bot${BOT_TOKEN}`)
     .then(() => console.log('✅ Webhook registered successfully'))
     .catch(err => console.error('❌ Webhook registration failed:', err.message));
 
-// Telegram sends updates to this endpoint
+// Telegram sends updates to this endpoint.
+// Respond 200 IMMEDIATELY so Telegram never times out and retries,
+// then process the update asynchronously.
 app.post(`/bot${BOT_TOKEN}`, (req, res) => {
-    bot.processUpdate(req.body);
     res.sendStatus(200);
+    setImmediate(() => bot.processUpdate(req.body));
 });
 
 // Health-check endpoint — ping this via UptimeRobot to keep Render free tier awake
@@ -146,7 +148,7 @@ const HELP_TEXT =
     `/help — Show this menu`;
 
 // /getchatid — prints the current chat's ID so you can copy it into Render env vars
-bot.onText(/\/getchatid(?:@\S+)?$/, (msg) => {
+bot.onText(/\/getchatid(?:@\S+)?(?:\s|$)/, (msg) => {
     bot.sendMessage(
         msg.chat.id,
         `🆔 *Chat ID:* \`${msg.chat.id}\`\n_Copy this value and set it as GROUP\_CHAT\_ID in your Render environment variables._`,
@@ -155,7 +157,7 @@ bot.onText(/\/getchatid(?:@\S+)?$/, (msg) => {
 });
 
 // /start
-bot.onText(/\/start(?:@\S+)?$/, (msg) => {
+bot.onText(/\/start(?:@\S+)?(?:\s|$)/, (msg) => {
     const name = msg.from.first_name || 'Coder';
     bot.sendMessage(
         msg.chat.id,
@@ -165,7 +167,7 @@ bot.onText(/\/start(?:@\S+)?$/, (msg) => {
 });
 
 // /help
-bot.onText(/\/help(?:@\S+)?$/, (msg) => {
+bot.onText(/\/help(?:@\S+)?(?:\s|$)/, (msg) => {
     bot.sendMessage(msg.chat.id, HELP_TEXT, { parse_mode: 'Markdown' });
 });
 
@@ -242,7 +244,7 @@ bot.onText(/\/removehandle(?:@\S+)?\s+@?(\S+)/i, (msg, match) => {
 });
 
 // /handles — list all registered handles
-bot.onText(/\/handles(?:@\S+)?$/, (msg) => {
+bot.onText(/\/handles(?:@\S+)?(?:\s|$)/, (msg) => {
     const db      = loadData();
     const entries = Object.values(db.handles);
 
@@ -259,7 +261,7 @@ bot.onText(/\/handles(?:@\S+)?$/, (msg) => {
 });
 
 // /leaderboard — sorted by total problems solved
-bot.onText(/\/leaderboard(?:@\S+)?$/, (msg) => {
+bot.onText(/\/leaderboard(?:@\S+)?(?:\s|$)/, (msg) => {
     const db      = loadData();
     const entries = Object.values(db.handles);
 
@@ -275,7 +277,7 @@ bot.onText(/\/leaderboard(?:@\S+)?$/, (msg) => {
 });
 
 // /contests — upcoming Codeforces contests (next 5)
-bot.onText(/\/contests(?:@\S+)?$/, async (msg) => {
+bot.onText(/\/contests(?:@\S+)?(?:\s|$)/, async (msg) => {
     const chatId  = msg.chat.id;
     const pending = await bot.sendMessage(chatId, '⏳ Fetching contests…');
 
