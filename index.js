@@ -547,8 +547,8 @@ cron.schedule('* * * * *', async () => {
     }
 });
 
-// ─── Cron: Daily Leaderboard at 23:59 UTC ────────────────────────────────────
-// Posts today's final leaderboard (live from CF API) at 23:59 UTC.
+// ─── Cron: Daily Leaderboard at 23:59 Asia/Dhaka ───────────────────────────────
+// Posts today's final leaderboard (live from CF API) at 23:59 Asia/Dhaka (UTC+6).
 cron.schedule('59 23 * * *', async () => {
     if (!GROUP_CHAT_ID) return;
     const db      = await loadData();
@@ -579,11 +579,11 @@ cron.schedule('59 23 * * *', async () => {
 
     await bot.sendMessage(
         GROUP_CHAT_ID,
-        `📅 *Daily Leaderboard — ${today} UTC*\n\n` +
+        `📅 *Daily Leaderboard — ${today} (BD)*\n\n` +
         (hasActivity ? rows : '_No problems solved today. Grind harder tomorrow!_ 💪'),
         { parse_mode: 'Markdown' }
     );
-});
+}, { timezone: 'Asia/Dhaka' });
 
 // ─── Cron: Morning Summary at 09:00 UTC ───────────────────────────────────────────
 // Motivational good-morning message with all-time top 3.
