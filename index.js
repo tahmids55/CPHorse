@@ -138,17 +138,27 @@ async function getCFAllTimeSolves(handle) {
 async function getCFDailySolves(handle) {
     const todayMidnightUtc = Math.floor(new Date().setUTCHours(0, 0, 0, 0) / 1000);
     const { data } = await axios.get(`${CF_API}/user.status`, {
-        params: { handle, from: 1, count: 300 },
+        params: { handle, from: 1, count: 10000 },
         timeout: 15000
     });
     if (data.status !== 'OK') throw new Error(data.comment);
-    const solved = new Set();
+    
+    const solvedTime = new Map();
     for (const sub of data.result) {
-        if (sub.verdict === 'OK' && sub.creationTimeSeconds >= todayMidnightUtc) {
-            solved.add(`${sub.problem.contestId}-${sub.problem.index}`);
+        if (sub.verdict === 'OK') {
+            const probStr = `${sub.problem.contestId}-${sub.problem.index}`;
+            // Since data is newest first, the oldest solve time will overwrite newer ones
+            solvedTime.set(probStr, sub.creationTimeSeconds);
         }
     }
-    return solved.size;
+    
+    let count = 0;
+    for (const time of solvedTime.values()) {
+        if (time >= todayMidnightUtc) {
+            count++;
+        }
+    }
+    return count;
 }
 
 async function verifyCFHandle(handle) {
@@ -469,38 +479,68 @@ cron.schedule(`*/${POLL_INTERVAL} * * * *`, async () => {
             const newSolves = accepted.filter(s => s.id > user.lastSubmissionId);
 
             if (newSolves.length > 0) {
+                // Fetch full history to ensure we don't count resubmissions of already solved problems
+                const { data: allHistory } = await axios.get(`${CF_API}/user.status`, {
+                    params: { handle: user.cfHandle, from: 1, count: 10000 },
+                    timeout: 15000
+                }).catch(() => ({ data: { status: 'FAILED' } }));
+                
+                const previouslySolved = new Set();
+                if (allHistory.status === 'OK') {
+                    for (const sub of allHistory.result) {
+                        if (sub.verdict === 'OK' && sub.id <= user.lastSubmissionId) {
+                            previouslySolved.add(`${sub.problem.contestId}-${sub.problem.index}`);
+                        }
+                    }
+                }
+
                 // Advance the cursor
                 db.handles[key].lastSubmissionId = Math.max(...newSolves.map(s => s.id));
-                db.handles[key].solveCount       = (db.handles[key].solveCount || 0) + newSolves.length;
-
-                // Track daily solves — reset count if it's a new UTC day
-                const today = new Date().toISOString().slice(0, 10);
-                if (db.handles[key].dailyDate !== today) {
-                    db.handles[key].dailyDate   = today;
-                    db.handles[key].dailySolves = 0;
+                
+                const uniqueNewSolves = [];
+                for (const sub of newSolves) {
+                    const probStr = `${sub.problem.contestId}-${sub.problem.index}`;
+                    if (!previouslySolved.has(probStr)) {
+                        previouslySolved.add(probStr); // prevent duplicates in the same batch
+                        uniqueNewSolves.push(sub);
+                    }
                 }
-                db.handles[key].dailySolves = (db.handles[key].dailySolves || 0) + newSolves.length;
 
-                changed = true;
+                if (uniqueNewSolves.length > 0) {
+                    db.handles[key].solveCount       = (db.handles[key].solveCount || 0) + uniqueNewSolves.length;
 
-                // Post in chronological order (oldest first)
-                for (const sub of newSolves.reverse()) {
-                    const prob   = sub.problem;
-                    const rating = prob.rating ? `⭐ Rating: *${prob.rating}*` : `⭐ Rating: *Unrated*`;
+                    // Track daily solves — reset count if it's a new UTC day
+                    const today = new Date().toISOString().slice(0, 10);
+                    if (db.handles[key].dailyDate !== today) {
+                        db.handles[key].dailyDate   = today;
+                        db.handles[key].dailySolves = 0;
+                    }
+                    db.handles[key].dailySolves = (db.handles[key].dailySolves || 0) + uniqueNewSolves.length;
 
-                    const message =
-                        `🚀 *CP UPDATE*\n\n` +
-                        `@${escMd(user.telegramUsername)} solved: *${escMd(prob.name)}*\n` +
-                        `${rating}\n` +
-                        `🔗 ${problemLink(sub)}`;
+                    changed = true;
 
-                    await bot.sendMessage(GROUP_CHAT_ID, message, {
-                        parse_mode: 'Markdown',
-                        disable_web_page_preview: true
-                    });
+                    // Post in chronological order (oldest first)
+                    for (const sub of uniqueNewSolves.reverse()) {
+                        const prob   = sub.problem;
+                        const rating = prob.rating ? `⭐ Rating: *${prob.rating}*` : `⭐ Rating: *Unrated*`;
 
-                    // Small delay to respect Telegram rate limits (30 msgs/sec)
-                    await sleep(500);
+                        const message =
+                            `🚀 *CP UPDATE*\n\n` +
+                            `@${escMd(user.telegramUsername)} solved: *${escMd(prob.name)}*\n` +
+                            `${rating}\n` +
+                            `🔗 ${problemLink(sub)}`;
+
+                        await bot.sendMessage(GROUP_CHAT_ID, message, {
+                            parse_mode: 'Markdown',
+                            disable_web_page_preview: true
+                        });
+
+                        // Small delay to respect Telegram rate limits (30 msgs/sec)
+                        await sleep(500);
+                    }
+                } else {
+                    // cursor advanced but no unique new solves
+                    changed = true;
                 }
             }
         } catch (err) {
